@@ -1,21 +1,31 @@
-name: Docker Image CI/CD
+name: Build & Push Community Image
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "Dockerfile.Community"
+      - "start.sh"
+      - ".github/workflows/build.yml"
   schedule:
-    - cron: '0 1 * * *'  # Run daily at 1:00 AM UTC
+    - cron: "0 1 * * *" # daily 01:00 UTC
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
       packages: write
-      id-token: write
+      contents: read
 
-    strategy:
-      matrix:
-        dockerfile: ['Dockerfile.Community', 'Dockerfile.Enterprise']
+    concurrency:
+      group: docker-community-${{ github.ref }}
+      cancel-in-progress: true
+
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
+      DOCKERFILE_PATH: Dockerfile.Community
 
     steps:
       - name: Checkout sources
@@ -25,10 +35,7 @@ jobs:
         uses: docker/setup-qemu-action@v3
         
       - name: Set up Docker Buildx
-        id: buildx
         uses: docker/setup-buildx-action@v3
-        with:
-          platforms: linux/amd64
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
@@ -37,18 +44,49 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract version from Dockerfile name
-        id: extract_version
+      - name: Resolve CE base tag from Dockerfile
+        id: ce_tag
         run: |
-          version="${{ matrix.dockerfile }}"
-          version="${version#Dockerfile.}" # Remove "Dockerfile." prefix if it exists
-          echo "version=${version}" >> $GITHUB_OUTPUT
+          from="$(awk 'toupper($1)=="FROM"{print $2; exit}' "${{ env.DOCKERFILE_PATH }}")"
+          if [ -z "$from" ]; then
+            echo "Unable to read FROM from ${{ env.DOCKERFILE_PATH }}" >&2
+            exit 1
+          fi
+
+          case "$from" in
+            chatwoot/chatwoot:*) ce_tag="${from#chatwoot/chatwoot:}" ;;
+            *)
+              echo "Unexpected base image (expected chatwoot/chatwoot:*): $from" >&2
+              exit 1
+              ;;
+          esac
+
+          if [ -z "$ce_tag" ]; then
+            echo "Unable to parse CE tag from: $from" >&2
+            exit 1
+          fi
+
+          echo "ce_tag=$ce_tag" >> "$GITHUB_OUTPUT"
         shell: bash
 
-      - name: Build and Publish
-        uses: docker/build-push-action@v5
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
         with:
-          file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.ce_tag.outputs.ce_tag }}
+
+      - name: Build and push (Community)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ env.DOCKERFILE_PATH }}
+          platforms: linux/amd64,linux/arm64
           push: true
-          tags: ghcr.io/${{ github.repository }}:${{ steps.extract_version.outputs.version }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
