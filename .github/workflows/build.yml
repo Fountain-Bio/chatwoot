@@ -8,8 +8,6 @@ on:
       - "Dockerfile.Community"
       - "start.sh"
       - ".github/workflows/build.yml"
-  schedule:
-    - cron: "0 1 * * *" # daily 01:00 UTC
 
 jobs:
   build:
