@@ -76,7 +76,7 @@ jobs:
             type=raw,value=${{ steps.ce_tag.outputs.ce_tag }}
 
       - name: Build and push (Community)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ${{ env.DOCKERFILE_PATH }}
