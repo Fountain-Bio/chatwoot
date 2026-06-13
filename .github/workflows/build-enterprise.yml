@@ -1,6 +1,7 @@
 name: Build & Push Enterprise Image
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
