@@ -1,0 +1,90 @@
+name: Build & Push Enterprise Image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "Dockerfile.Enterprise"
+      - "start.sh"
+      - ".github/workflows/build.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+
+    concurrency:
+      group: docker-community-${{ github.ref }}
+      cancel-in-progress: true
+
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
+      DOCKERFILE_PATH: Dockerfile.Enterprise
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v6
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+        
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve EE base tag from Dockerfile
+        id: ee_tag
+        run: |
+          from="$(awk 'toupper($1)=="FROM"{print $2; exit}' "${{ env.DOCKERFILE_PATH }}")"
+          if [ -z "$from" ]; then
+            echo "Unable to read FROM from ${{ env.DOCKERFILE_PATH }}" >&2
+            exit 1
+          fi
+
+          case "$from" in
+            chatwoot/chatwoot:*) ce_tag="${from#chatwoot/chatwoot:}" ;;
+            *)
+              echo "Unexpected base image (expected chatwoot/chatwoot:*): $from" >&2
+              exit 1
+              ;;
+          esac
+
+          if [ -z "$ee_tag" ]; then
+            echo "Unable to parse EE tag from: $from" >&2
+            exit 1
+          fi
+
+          echo "ee_tag=$ee_tag" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.ee_tag.outputs.ee_tag }}
+
+      - name: Build and push (Enterprise)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ env.DOCKERFILE_PATH }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
