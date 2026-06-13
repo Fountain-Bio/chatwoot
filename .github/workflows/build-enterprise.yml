@@ -52,7 +52,7 @@ jobs:
           fi
 
           case "$from" in
-            chatwoot/chatwoot:*) ce_tag="${from#chatwoot/chatwoot:}" ;;
+            chatwoot/chatwoot:*) ee_tag="${from#chatwoot/chatwoot:}" ;;
             *)
               echo "Unexpected base image (expected chatwoot/chatwoot:*): $from" >&2
               exit 1
