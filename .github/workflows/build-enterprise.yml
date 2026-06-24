@@ -18,7 +18,7 @@ jobs:
       contents: read
 
     concurrency:
-      group: docker-community-${{ github.ref }}
+      group: docker-enterprise-${{ github.ref }}
       cancel-in-progress: true
 
     env:
